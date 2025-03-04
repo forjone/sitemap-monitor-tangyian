@@ -1,0 +1,14 @@
+sites:
+  - name: "CrazyGames"
+    sitemap_urls:
+      - "https://www.crazygames.com/en/sitemap"
+    check_interval: 86400
+    active: true
+
+feishu:
+  webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/c84594b9-e8dd-4828-a24d-cb1175f41f3a"
+  secret: "YOUR_SECRET"
+
+storage:
+  retention_days: 7
+  data_dir: "./data"
