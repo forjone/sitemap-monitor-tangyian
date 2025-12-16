@@ -46,8 +46,8 @@ sites:
 
 
 feishu:
-  webhook_url: ""
-  secret: "YOUR_SECRET"
+  webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/d5850566-3d54-4d64-bfb5-2fc6a9130a66"
+  secret: "Wy7K5JpwvJPvMKoGkiQqte"
 
 storage:
   retention_days: 7
