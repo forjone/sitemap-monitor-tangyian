@@ -8,6 +8,10 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from bs4 import BeautifulSoup
+import time
+import hmac
+import hashlib
+import base64
 
 # 设置日志记录
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -89,6 +93,15 @@ def compare_data(site_name, new_urls):
     
     return [url for url in new_urls if url not in last_urls]
 
+def gen_sign(timestamp, secret):
+    # 拼接timestamp和secret
+    string_to_sign = '{}\n{}'.format(timestamp, secret)
+    hmac_code = hmac.new(string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
+
+    # 对结果进行base64编码
+    sign = base64.b64encode(hmac_code).decode('utf-8')
+    return sign
+
 def send_feishu_notification(new_urls, config, site_name):
     if not new_urls:
         return
@@ -114,11 +127,28 @@ def send_feishu_notification(new_urls, config, site_name):
             ]
         }
     }
+
+    # 如果配置了 secret，则添加签名
+    if secret:
+        timestamp = int(time.time())
+        sign = gen_sign(timestamp, secret)
+        message["timestamp"] = str(timestamp)
+        message["sign"] = sign
+
+    logging.info(f"发送飞书请求 payload: {json.dumps(message, ensure_ascii=False)}")
     
     for attempt in range(3):  # 重试机制
         try:
             resp = requests.post(webhook_url, json=message)
+            logging.info(f"飞书响应状态码: {resp.status_code}, 响应内容: {resp.text}")
             resp.raise_for_status()
+            
+            # 检查业务状态码
+            resp_json = resp.json()
+            if resp_json.get("code") != 0:
+                logging.error(f"飞书API报错: {resp_json}")
+                continue # 视为失败，触发重试或进入下一次循环
+
             logging.info("飞书通知发送成功")
             return
         except requests.RequestException as e:
