@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sitemap Monitor Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#10b981',
+                        dark: '#0f172a',
+                        'dark-lighter': '#1e293b'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #e2e8f0;
+        }
+
+        .card {
+            background-color: #1e293b;
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app" class="min-h-screen p-8 max-w-7xl mx-auto">
+
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-3xl font-bold text-white flex items-center gap-2">
+                🕸️ Sitemap Monitor
+            </h1>
+            <div class="flex gap-4">
+                <button @click="triggerRun" :disabled="loading"
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition flex items-center gap-2">
+                    <span v-if="loading">Running...</span>
+                    <span v-else>▶ Run Check Now</span>
+                </button>
+                <button @click="showAddModal = true"
+                    class="bg-primary hover:bg-green-600 text-white px-4 py-2 rounded-lg transition">
+                    + Add New Site
+                </button>
+            </div>
+        </div>
+
+        <!-- Stats Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="card">
+                <div class="text-gray-400 mb-2">Total Sites</div>
+                <div class="text-4xl font-bold">{{ stats.total_sites }}</div>
+            </div>
+            <div class="card">
+                <div class="text-gray-400 mb-2">Total URLs Tracked</div>
+                <div class="text-4xl font-bold text-blue-400">{{ stats.total_urls }}</div>
+            </div>
+            <div class="card">
+                <div class="text-gray-400 mb-2">New URLs (24h)</div>
+                <div class="text-4xl font-bold text-green-400">+{{ stats.new_urls_24h }}</div>
+            </div>
+        </div>
+
+        <!-- Sites Table -->
+        <div class="card overflow-hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold">Monitored Sites</h2>
+                <button @click="fetchData" class="text-sm text-gray-400 hover:text-white">Refresh</button>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead>
+                        <tr class="text-gray-400 border-b border-gray-700">
+                            <th class="pb-3 pl-2">ID</th>
+                            <th class="pb-3">Name</th>
+                            <th class="pb-3">Category</th>
+                            <th class="pb-3">Sitemap URL</th>
+                            <th class="pb-3">Last Check</th>
+                            <th class="pb-3 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700">
+                        <tr v-for="site in sites" :key="site.id" class="hover:bg-gray-800 transition">
+                            <td class="py-3 pl-2 text-gray-500">#{{ site.id }}</td>
+                            <td class="py-3 font-medium">{{ site.name }}</td>
+                            <td class="py-3">
+                                <span class="bg-gray-700 px-2 py-1 rounded text-xs">{{ site.category_name }}</span>
+                            </td>
+                            <td class="py-3 text-gray-400 text-sm truncate max-w-xs">{{ site.sitemap_url }}</td>
+                            <td class="py-3 text-gray-400 text-sm">
+                                {{ site.last_check_time ? new Date(site.last_check_time).toLocaleString() : 'Never' }}
+                            </td>
+                            <td class="py-3 text-right">
+                                <button @click="deleteSite(site.id)"
+                                    class="text-red-400 hover:text-red-300 text-sm">Delete</button>
+                            </td>
+                        </tr>
+                        <tr v-if="sites.length === 0">
+                            <td colspan="6" class="py-8 text-center text-gray-500">No sites configured yet.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Add Site Modal -->
+        <div v-if="showAddModal"
+            class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div class="bg-[#1e293b] rounded-xl p-6 w-full max-w-md shadow-2xl border border-gray-700">
+                <h3 class="text-xl font-bold mb-4">Add New Site</h3>
+
+                <form @submit.prevent="addSite">
+                    <div class="mb-4">
+                        <label class="block text-gray-400 text-sm mb-1">Site Name</label>
+                        <input v-model="newSite.name" type="text" required
+                            class="w-full bg-[#0f172a] border border-gray-600 rounded p-2 text-white focus:border-primary outline-none">
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="block text-gray-400 text-sm mb-1">Sitemap URL</label>
+                        <input v-model="newSite.sitemap_url" type="url" required
+                            class="w-full bg-[#0f172a] border border-gray-600 rounded p-2 text-white focus:border-primary outline-none">
+                    </div>
+
+                    <div class="mb-6">
+                        <label class="block text-gray-400 text-sm mb-1">Category</label>
+                        <select v-model="newSite.category_id"
+                            class="w-full bg-[#0f172a] border border-gray-600 rounded p-2 text-white focus:border-primary outline-none">
+                            <option v-for="cat in categories" :value="cat.id">{{ cat.name }}</option>
+                        </select>
+                        <div class="mt-2 flex gap-2">
+                            <input v-model="newCategoryName" placeholder="Or new category..."
+                                class="flex-1 bg-[#0f172a] border border-gray-600 rounded p-1 text-sm text-white">
+                            <button type="button" @click="addCategory"
+                                class="text-xs bg-gray-700 px-2 rounded hover:bg-gray-600">Add</button>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end gap-3">
+                        <button type="button" @click="showAddModal = false"
+                            class="text-gray-400 hover:text-white">Cancel</button>
+                        <button type="submit" class="bg-primary hover:bg-green-600 text-white px-4 py-2 rounded">Save
+                            Site</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted } = Vue
+
+        createApp({
+            setup() {
+                const stats = ref({ total_sites: 0, total_urls: 0, new_urls_24h: 0 })
+                const sites = ref([])
+                const categories = ref([])
+                const loading = ref(false)
+
+                // Modal state
+                const showAddModal = ref(false)
+                const newSite = ref({ name: '', sitemap_url: '', category_id: null })
+                const newCategoryName = ref('')
+
+                const fetchData = async () => {
+                    const [statsRes, sitesRes, catsRes] = await Promise.all([
+                        fetch('/api/stats').then(r => r.json()),
+                        fetch('/api/sites').then(r => r.json()),
+                        fetch('/api/categories').then(r => r.json())
+                    ])
+                    stats.value = statsRes
+                    sites.value = sitesRes
+                    categories.value = catsRes
+
+                    // Set default category if none selected
+                    if (!newSite.value.category_id && categories.value.length > 0) {
+                        newSite.value.category_id = categories.value[0].id
+                    }
+                }
+
+                const triggerRun = async () => {
+                    loading.value = true
+                    try {
+                        await fetch('/api/run-now', { method: 'POST' })
+                        alert('Job started in background!')
+                    } finally {
+                        loading.value = false
+                    }
+                }
+
+                const addCategory = async () => {
+                    if (!newCategoryName.value) return
+                    const res = await fetch('/api/categories', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: newCategoryName.value })
+                    })
+                    const cat = await res.json()
+                    categories.value.push(cat)
+                    newSite.value.category_id = cat.id // Auto select
+                    newCategoryName.value = ''
+                }
+
+                const addSite = async () => {
+                    await fetch('/api/sites', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(newSite.value)
+                    })
+                    showAddModal.value = false
+                    newSite.value = { name: '', sitemap_url: '', category_id: categories.value[0]?.id }
+                    fetchData()
+                }
+
+                const deleteSite = async (id) => {
+                    if (!confirm('Are you sure you want to delete this site and its data?')) return
+                    await fetch(`/api/sites/${id}`, { method: 'DELETE' })
+                    fetchData()
+                }
+
+                // Initial load
+                // Call /api/init just in case to ensure default category
+                fetch('/api/init').then(fetchData)
+
+                return {
+                    stats, sites, categories, loading,
+                    showAddModal, newSite, newCategoryName,
+                    fetchData, triggerRun, addCategory, addSite, deleteSite
+                }
+            }
+        }).mount('#app')
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,24 @@
+services:
+  sitemap-monitor:
+    build: .
+    container_name: sitemap_monitor
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - TZ=Asia/Shanghai
+      - DB_TYPE=mysql
+      - DB_HOST=superfa_mysql
+      - DB_PORT=3306
+      - DB_USER=n8n_superfa
+      - DB_PASSWORD=Abc@911911
+      - DB_NAME=sitemapmonitor
+    volumes:
+      - ./data:/app/diff  # Map local data directory if needed, or remove if fully DB based
+      - ./config.yaml:/app/config.yaml
+    networks:
+      - db_network
+
+networks:
+  db_network:
+    external: true

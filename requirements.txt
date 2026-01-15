@@ -1,0 +1,12 @@
+requests
+cloudscraper
+pyyaml
+beautifulsoup4
+lxml
+sqlmodel
+pymysql
+cryptography
+typer
+fastapi
+uvicorn
+jinja2

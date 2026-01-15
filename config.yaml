@@ -52,3 +52,12 @@ feishu:
 storage:
   retention_days: 7
   data_dir: "./data"
+
+database:
+  type: mysql
+  host: "superfa_mysql" # Docker internal hostname. Use 127.0.0.1 if running locally with port forwarding.
+  port: 3306
+  user: "n8n_superfa"
+  password: "Abc@911911"
+  name: "sitemapmonitor"
+

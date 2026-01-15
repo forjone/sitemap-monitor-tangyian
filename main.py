@@ -5,25 +5,25 @@ import cloudscraper
 import yaml
 import gzip
 import logging
-from datetime import datetime, timedelta
-from pathlib import Path
-from bs4 import BeautifulSoup
 import time
 import hmac
 import hashlib
 import base64
+import schedule
+import argparse
+from datetime import datetime, timedelta
+from bs4 import BeautifulSoup
+from sqlmodel import Session, select
+from models import Site, UrlRecord, Category
+from database import get_session, init_db
 
 # 设置日志记录
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def load_config(config_path='config.yaml'):
-    with open(config_path) as f:
-        return yaml.safe_load(f)
-
 def process_sitemap(url):
     try:
         scraper = cloudscraper.create_scraper()
-        response = scraper.get(url, timeout=10)
+        response = scraper.get(url, timeout=30)
         response.raise_for_status()
 
         content = response.content
@@ -54,51 +54,9 @@ def parse_xml(content):
 def parse_txt(content):
     return [line.strip() for line in content.splitlines() if line.strip()]
 
-def save_latest(site_name, new_urls):
-    base_dir = Path('latest')
-    
-    # 创建latest目录（与日期目录同级）
-    latest_dir = base_dir
-    latest_dir.mkdir(parents=True, exist_ok=True)
-    
-    # 保存latest.json
-    latest_file = latest_dir / f'{site_name}.json'
-    with open(latest_file, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(new_urls))
-
-def save_diff(site_name, new_urls):
-    base_dir = Path('diff')
-        
-    # 创建日期目录
-    today = datetime.now().strftime('%Y%m%d')
-    date_dir = base_dir / today
-    date_dir.mkdir(parents=True, exist_ok=True)
-    
-    # 保存当日新增数据
-    file_path = date_dir / f'{site_name}.json'
-    mode = 'a' if file_path.exists() else 'w'
-    with open(file_path, mode, encoding='utf-8') as f:
-        if mode == 'a':
-            f.write('\n--------------------------------\n')  # 添加分隔符
-        f.write('\n'.join(new_urls) + '\n')  # 确保每个URL后都有换行
-
-def compare_data(site_name, new_urls):
-    latest_file = Path('latest') / f'{site_name}.json'
-    
-    if not latest_file.exists():
-        return []
-        
-    with open(latest_file) as f:
-        last_urls = set(f.read().splitlines())
-    
-    return [url for url in new_urls if url not in last_urls]
-
 def gen_sign(timestamp, secret):
-    # 拼接timestamp和secret
     string_to_sign = '{}\n{}'.format(timestamp, secret)
     hmac_code = hmac.new(string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
-
-    # 对结果进行base64编码
     sign = base64.b64encode(hmac_code).decode('utf-8')
     return sign
 
@@ -106,8 +64,13 @@ def send_feishu_notification(new_urls, config, site_name):
     if not new_urls:
         return
     
-    webhook_url = config['feishu']['webhook_url']
-    secret = config['feishu'].get('secret')
+    feishu_conf = config.get('feishu', {})
+    webhook_url = feishu_conf.get('webhook_url')
+    secret = feishu_conf.get('secret')
+    
+    if not webhook_url:
+        logging.warning("Feishu webhook_url not configured.")
+        return
     
     message = {
         "msg_type": "interactive",
@@ -128,87 +91,119 @@ def send_feishu_notification(new_urls, config, site_name):
         }
     }
 
-    # 如果配置了 secret，则添加签名
     if secret:
         timestamp = int(time.time())
         sign = gen_sign(timestamp, secret)
         message["timestamp"] = str(timestamp)
         message["sign"] = sign
-
-    logging.info(f"发送飞书请求 payload: {json.dumps(message, ensure_ascii=False)}")
     
-    for attempt in range(3):  # 重试机制
+    # logging.info(f"Payload: {json.dumps(message, ensure_ascii=False)}")
+
+    for attempt in range(3):
         try:
             resp = requests.post(webhook_url, json=message)
-            logging.info(f"飞书响应状态码: {resp.status_code}, 响应内容: {resp.text}")
             resp.raise_for_status()
-            
-            # 检查业务状态码
             resp_json = resp.json()
             if resp_json.get("code") != 0:
                 logging.error(f"飞书API报错: {resp_json}")
-                continue # 视为失败，触发重试或进入下一次循环
-
+                continue
             logging.info("飞书通知发送成功")
             return
         except requests.RequestException as e:
             logging.error(f"飞书通知发送失败: {str(e)}")
-            if attempt < 2:
-                logging.info("重试发送通知...")
+            time.sleep(2)
 
-def main(config_path='config.yaml'):
-    config = load_config(config_path)
+def check_site(session: Session, site: Site, config):
+    logging.info(f"Checking site: {site.name}")
     
-    for site in config['sites']:
-        if not site['active']:
-            continue
-            
-        logging.info(f"处理站点: {site['name']}")
-        all_urls = []
-        for sitemap_url in site['sitemap_urls']:
-            urls = process_sitemap(sitemap_url)
-            all_urls.extend(urls)
-            
-        # 去重处理
-        unique_urls = list({url: None for url in all_urls}.keys())
-        new_urls = compare_data(site['name'], unique_urls)
+    current_urls = []
+    # Currently assuming single sitemap URL in DB, but model supports one. 
+    # If multiple sitemaps needed per site, we need to iterate or change model.
+    # For now, using site.sitemap_url
+    
+    sitemap_list = [site.sitemap_url] # Simplify for now
+    
+    all_qs = []
+    for sm_url in sitemap_list:
+        urls = process_sitemap(sm_url)
+        all_qs.extend(urls)
         
-        save_latest(site['name'], unique_urls)
-        if new_urls:
-            save_diff(site['name'], new_urls)
-            send_feishu_notification(new_urls, config, site['name'])
-            
-        # 清理旧数据
-        cleanup_old_data(site['name'], config)
+    unique_urls = set(all_qs)
+    
+    new_found_urls = []
+    
+    for url in unique_urls:
+        # Check if URL exists in DB
+        exists = session.exec(select(UrlRecord).where(UrlRecord.url == url, UrlRecord.site_id == site.id)).first()
+        if not exists:
+            # Add new record
+            record = UrlRecord(
+                url=url,
+                site_id=site.id,
+                is_new=True
+            )
+            session.add(record)
+            new_found_urls.append(url)
+    
+    site.last_check_time = datetime.now()
+    session.add(site)
+    session.commit()
+    
+    if new_found_urls:
+        logging.info(f"Found {len(new_found_urls)} new URLs for {site.name}")
+        send_feishu_notification(new_found_urls, config, site.name)
+    else:
+        logging.info(f"No new URLs for {site.name}")
 
-def cleanup_old_data(site_name, config):
-    data_dir = Path('diff')
-    if not data_dir.exists():
-        return
-        
-    # 获取配置中的保留天数
-    retention_days = config.get('retention_days', 7)
-    cutoff = datetime.now() - timedelta(days=retention_days)
+def load_app_config():
+    with open('config.yaml') as f:
+        return yaml.safe_load(f)
+
+def job():
+    init_db()
+    session = get_session()
+    config = load_app_config()
     
-    # 遍历所有日期文件夹
-    for date_dir in data_dir.glob('*'):
-        if not date_dir.is_dir():
-            continue
-            
-        try:
-            # 解析文件夹名称为日期
-            dir_date = datetime.strptime(date_dir.name, '%Y%m%d')
-            if dir_date < cutoff:
-                # 删除整个日期文件夹
-                for f in date_dir.glob('*.json'):
-                    f.unlink()
-                date_dir.rmdir()
-                logging.info(f"已删除过期文件夹: {date_dir.name}")
-        except ValueError:
-            # 忽略非日期格式的文件夹
-            continue
-        except Exception as e:
-            logging.error(f"删除文件夹时出错: {str(e)}")
+    active_sites = session.exec(select(Site).where(Site.active == True)).all()
+    if not active_sites:
+        logging.info("No active sites found in database.")
+        
+        # Fallback: Check if we need to sync from config (for first run if valid)
+        # But Manager CLI is preferred for adding sites.
+        pass
+
+    for site in active_sites:
+        check_site(session, site, config)
+    
+    session.close()
+
+def run_once():
+    logging.info("Starting one-time check...")
+    job()
+    logging.info("Check complete.")
+
+def run_daemon():
+    logging.info("Starting daemon mode...")
+    # Schedule to run every 1 hour, or customize via config
+    schedule.every(1).hours.do(job)
+    
+    # Run immediately on start
+    job()
+    
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--daemon', action='store_true', help='Run in daemon mode')
+    args = parser.parse_args()
+    
+    # Ensure DB is ready
+    init_db()
+    
+    if args.daemon:
+        run_daemon()
+    else:
+        run_once()
+
