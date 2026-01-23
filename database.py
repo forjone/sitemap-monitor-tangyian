@@ -1,4 +1,5 @@
 from sqlmodel import create_engine, SQLModel, Session
+from urllib.parse import quote_plus
 import pymysql
 import yaml
 import os
@@ -23,9 +24,12 @@ def get_db_url(config):
     
     if db_type == 'sqlite':
         return f"sqlite:///{name}.db"
-    
+
+    # URL encode password to handle special characters like @
+    encoded_password = quote_plus(password)
+
     # pymysql connection string
-    return f"mysql+pymysql://{user}:{password}@{host}:{port}/{name}"
+    return f"mysql+pymysql://{user}:{encoded_password}@{host}:{port}/{name}"
 
 def init_db(config_path='config.yaml'):
     global engine
