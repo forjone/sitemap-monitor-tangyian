@@ -14,7 +14,8 @@ services:
       - DB_PASSWORD=Abc@911911
       - DB_NAME=sitemapmonitor
     volumes:
-      - ./data:/app/diff  # Map local data directory if needed, or remove if fully DB based
+      - ./data:/app/data           # 数据持久化目录
+      - ./latest:/app/latest       # 最新数据JSON文件
       - ./config.yaml:/app/config.yaml
     networks:
       - db_network

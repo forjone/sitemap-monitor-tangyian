@@ -55,8 +55,9 @@ def add_category(name: str):
 def stats():
     """Show basic stats."""
     session = get_session()
-    total_sites = session.query(Site).count()
-    total_urls = session.query(UrlRecord).count()
+    from sqlmodel import func
+    total_sites = session.exec(select(func.count(Site.id))).one()
+    total_urls = session.exec(select(func.count(UrlRecord.id))).one()
     print(f"Total Sites: {total_sites}")
     print(f"Total URLs Tracked: {total_urls}")
 

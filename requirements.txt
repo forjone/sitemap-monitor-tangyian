@@ -10,3 +10,4 @@ typer
 fastapi
 uvicorn
 jinja2
+schedule
