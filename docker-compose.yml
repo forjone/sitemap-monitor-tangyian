@@ -5,6 +5,11 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 20000
+        hard: 40000
     environment:
       - TZ=Asia/Shanghai
       - DB_TYPE=mysql

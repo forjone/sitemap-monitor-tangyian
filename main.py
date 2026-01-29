@@ -21,6 +21,7 @@ from database import get_session, init_db
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def process_sitemap(url):
+    scraper = None
     try:
         scraper = cloudscraper.create_scraper()
         response = scraper.get(url, timeout=30)
@@ -41,6 +42,9 @@ def process_sitemap(url):
     except Exception as e:
         logging.error(f"Unexpected error processing {url}: {str(e)}")
         return []
+    finally:
+        if scraper:
+            scraper.close()
 
 def parse_xml(content):
     urls = []
@@ -161,21 +165,25 @@ def load_app_config():
 
 def job():
     init_db()
+    
+    # Use context manager or try/finally to ensure session is closed
     session = get_session()
-    config = load_app_config()
-    
-    active_sites = session.exec(select(Site).where(Site.active == True)).all()
-    if not active_sites:
-        logging.info("No active sites found in database.")
+    try:
+        config = load_app_config()
         
-        # Fallback: Check if we need to sync from config (for first run if valid)
-        # But Manager CLI is preferred for adding sites.
-        pass
-
-    for site in active_sites:
-        check_site(session, site, config)
-    
-    session.close()
+        active_sites = session.exec(select(Site).where(Site.active == True)).all()
+        if not active_sites:
+            logging.info("No active sites found in database.")
+            # Fallback: Check if we need to sync from config (for first run if valid)
+            # But Manager CLI is preferred for adding sites.
+            pass
+        else:
+            for site in active_sites:
+                check_site(session, site, config)
+    except Exception as e:
+        logging.error(f"Error in job: {e}")
+    finally:
+        session.close()
 
 def run_once():
     logging.info("Starting one-time check...")
